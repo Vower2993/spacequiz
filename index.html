@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space Quiz</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* Dark background for space theme */
+            color: #e2e8f0; /* Light text color */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1rem;
+            box-sizing: border-box;
+        }
+        .quiz-container {
+            background-color: #2d3748; /* Slightly lighter dark background for container */
+            border-radius: 1rem; /* Rounded corners */
+            padding: 2rem;
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.2);
+            max-width: 600px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        .option-button {
+            background-color: #4a5568; /* Darker gray for options */
+            color: #e2e8f0;
+            padding: 0.75rem 1.25rem;
+            border-radius: 0.5rem;
+            text-align: left;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in-out, transform 0.1s ease-in-out;
+            border: 2px solid transparent; /* Default border */
+        }
+        .option-button:hover {
+            background-color: #636b77; /* Lighter gray on hover */
+            transform: translateY(-2px);
+        }
+        .option-button.selected {
+            border-color: #667eea; /* Blue border for selected */
+            background-color: #5a67d8; /* Blue background for selected */
+        }
+        .option-button.correct {
+            background-color: #48bb78; /* Green for correct */
+            border-color: #38a169;
+        }
+        .option-button.incorrect {
+            background-color: #f56565; /* Red for incorrect */
+            border-color: #e53e3e;
+        }
+        .submit-button, .play-again-button, .llm-button {
+            background-color: #667eea; /* Blue button */
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in-out, transform 0.1s ease-in-out;
+            text-align: center;
+        }
+        .submit-button:hover, .play-again-button:hover, .llm-button:hover {
+            background-color: #5a67d8; /* Darker blue on hover */
+            transform: translateY(-2px);
+        }
+        .feedback-message {
+            margin-top: 1rem;
+            font-weight: 600;
+            text-align: center;
+        }
+        .score-display {
+            font-size: 1.5rem;
+            font-weight: 700;
+            text-align: center;
+        }
+        .hidden {
+            display: none;
+        }
+        .loading-text {
+            color: #90cdf4; /* Light blue for loading */
+            font-style: italic;
+        }
+        .explanation-box {
+            background-color: #4a5568;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+            border: 1px solid #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="quiz-container">
+        <h1 class="text-3xl font-bold text-center mb-4">Space Quiz</h1>
+
+        <div id="quiz-section">
+            <p id="question-text" class="text-xl mb-6"></p>
+            <div id="options-container" class="grid grid-cols-1 gap-4 mb-6">
+                </div>
+            <button id="submit-button" class="submit-button w-full">Submit Answer</button>
+            <button id="explain-answer-button" class="llm-button w-full mt-4 hidden">✨ Explain Answer</button>
+            <button id="generate-question-button" class="llm-button w-full mt-4">✨ Generate New Question</button>
+
+            <div id="feedback-message" class="feedback-message hidden"></div>
+            <div id="loading-explanation" class="text-center loading-text hidden">Generating explanation...</div>
+            <div id="explanation-text" class="explanation-box hidden"></div>
+            <div id="loading-new-question" class="text-center loading-text hidden">Generating new question...</div>
+        </div>
+
+        <div id="score-section" class="hidden">
+            <p class="score-display">Your Score: <span id="final-score">0</span> / <span id="total-questions">0</span></p>
+            <button id="play-again-button" class="play-again-button w-full mt-6">Play Again</button>
+        </div>
+    </div>
+
+    <script>
+        // Array of quiz questions, options, and correct answers
+        let questions = [ // Changed to 'let' to allow adding new questions
+            {
+                question: "What is the largest planet in our solar system?",
+                options: ["Mars", "Jupiter", "Saturn", "Neptune"],
+                answer: "Jupiter"
+            },
+            {
+                question: "Which galaxy is our solar system a part of?",
+                options: ["Andromeda", "Triangulum", "Milky Way", "Whirlpool"],
+                answer: "Milky Way"
+            },
+            {
+                question: "What is the name of the first human to walk on the Moon?",
+                options: ["Buzz Aldrin", "Yuri Gagarin", "Neil Armstrong", "Michael Collins"],
+                answer: "Neil Armstrong"
+            },
+            {
+                question: "Which celestial body is known as the 'Red Planet'?",
+                options: ["Venus", "Mars", "Mercury", "Jupiter"],
+                answer: "Mars"
+            },
+            {
+                question: "What is a 'light-year' a measure of?",
+                options: ["Time", "Speed", "Distance", "Brightness"],
+                answer: "Distance"
+            }
+        ];
+
+        let currentQuestionIndex = 0;
+        let score = 0;
+        let selectedOption = null;
+        let quizSubmitted = false; // Flag to prevent multiple submissions per question
+
+        // Get DOM elements
+        const questionText = document.getElementById('question-text');
+        const optionsContainer = document.getElementById('options-container');
+        const submitButton = document.getElementById('submit-button');
+        const feedbackMessage = document.getElementById('feedback-message');
+        const quizSection = document.getElementById('quiz-section');
+        const scoreSection = document.getElementById('score-section');
+        const finalScoreSpan = document.getElementById('final-score');
+        const totalQuestionsSpan = document.getElementById('total-questions');
+        const playAgainButton = document.getElementById('play-again-button');
+        const explainAnswerButton = document.getElementById('explain-answer-button');
+        const generateQuestionButton = document.getElementById('generate-question-button');
+        const loadingExplanation = document.getElementById('loading-explanation');
+        const explanationText = document.getElementById('explanation-text');
+        const loadingNewQuestion = document.getElementById('loading-new-question');
+
+        // Gemini API configuration
+        const apiKey = ""; // Canvas will automatically provide the API key at runtime
+
+        /**
+         * Displays the current question and its options.
+         */
+        function displayQuestion() {
+            // Reset state for new question
+            selectedOption = null;
+            quizSubmitted = false;
+            feedbackMessage.classList.add('hidden');
+            feedbackMessage.textContent = '';
+            explanationText.classList.add('hidden'); // Hide explanation for new question
+            explanationText.textContent = '';
+            explainAnswerButton.classList.add('hidden'); // Hide explain button for new question
+            submitButton.textContent = 'Submit Answer';
+            submitButton.classList.remove('bg-green-500', 'bg-blue-500'); // Remove previous color if any
+            submitButton.classList.add('bg-indigo-500'); // Default blue
+
+            const currentQuestion = questions[currentQuestionIndex];
+            questionText.textContent = currentQuestion.question;
+            optionsContainer.innerHTML = ''; // Clear previous options
+
+            currentQuestion.options.forEach(option => {
+                const button = document.createElement('button');
+                button.textContent = option;
+                button.classList.add('option-button', 'w-full');
+                button.addEventListener('click', () => selectOption(button, option));
+                optionsContainer.appendChild(button);
+            });
+        }
+
+        /**
+         * Handles selecting an option.
+         * @param {HTMLButtonElement} button - The button element that was clicked.
+         * @param {string} option - The text content of the selected option.
+         */
+        function selectOption(button, option) {
+            if (quizSubmitted) return; // Prevent selecting new options after submission
+
+            // Remove 'selected' class from all other options
+            document.querySelectorAll('.option-button').forEach(btn => {
+                btn.classList.remove('selected');
+            });
+
+            // Add 'selected' class to the clicked button
+            button.classList.add('selected');
+            selectedOption = option;
+        }
+
+        /**
+         * Checks the selected answer and updates the score.
+         * Provides visual feedback (correct/incorrect styling).
+         */
+        function checkAnswer() {
+            if (quizSubmitted) return; // Prevent multiple checks for the same question
+            quizSubmitted = true; // Mark question as submitted
+
+            if (selectedOption === null) {
+                feedbackMessage.textContent = "Please select an answer!";
+                feedbackMessage.classList.remove('hidden');
+                feedbackMessage.style.color = '#f56565'; // Red for warning
+                quizSubmitted = false; // Allow re-submission if no option was selected
+                return;
+            }
+
+            const currentQuestion = questions[currentQuestionIndex];
+            const optionButtons = document.querySelectorAll('.option-button');
+
+            // Apply correct/incorrect styling to options
+            optionButtons.forEach(button => {
+                if (button.textContent === currentQuestion.answer) {
+                    button.classList.add('correct');
+                } else if (button.textContent === selectedOption) {
+                    button.classList.add('incorrect');
+                }
+                button.classList.remove('selected'); // Remove selected class after checking
+            });
+
+            if (selectedOption === currentQuestion.answer) {
+                score++;
+                feedbackMessage.textContent = "Correct!";
+                feedbackMessage.style.color = '#48bb78'; // Green
+            } else {
+                feedbackMessage.textContent = `Incorrect. The correct answer was: ${currentQuestion.answer}`;
+                feedbackMessage.style.color = '#f56565'; // Red
+            }
+            feedbackMessage.classList.remove('hidden');
+            explainAnswerButton.classList.remove('hidden'); // Show explain answer button
+
+            // Change submit button to "Next Question" or "Show Results"
+            submitButton.textContent = "Next Question";
+            submitButton.classList.remove('bg-indigo-500');
+            submitButton.classList.add('bg-green-500'); // Green for next action
+        }
+
+        /**
+         * Moves to the next question or shows the final score.
+         */
+        function nextQuestion() {
+            currentQuestionIndex++;
+            if (currentQuestionIndex < questions.length) {
+                displayQuestion();
+            } else {
+                showScore();
+            }
+        }
+
+        /**
+         * Displays the final score section.
+         */
+        function showScore() {
+            quizSection.classList.add('hidden');
+            scoreSection.classList.remove('hidden');
+            finalScoreSpan.textContent = score;
+            totalQuestionsSpan.textContent = questions.length; // Update total questions
+        }
+
+        /**
+         * Resets the quiz to play again.
+         */
+        function resetQuiz() {
+            currentQuestionIndex = 0;
+            score = 0;
+            selectedOption = null;
+            quizSubmitted = false;
+            scoreSection.classList.add('hidden');
+            quizSection.classList.remove('hidden');
+            // Re-initialize questions if needed, or just display the first one
+            displayQuestion();
+        }
+
+        /**
+         * Calls the Gemini API to generate an explanation for the current question.
+         */
+        async function explainAnswer() {
+            loadingExplanation.classList.remove('hidden');
+            explanationText.classList.add('hidden');
+            explainAnswerButton.disabled = true;
+
+            const currentQuestion = questions[currentQuestionIndex];
+            const prompt = `Provide a concise explanation for the following space quiz question and its correct answer.
+Question: "${currentQuestion.question}"
+Correct Answer: "${currentQuestion.answer}"`;
+
+            let chatHistory = [];
+            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+            const payload = { contents: chatHistory };
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    explanationText.textContent = text;
+                    explanationText.classList.remove('hidden');
+                } else {
+                    explanationText.textContent = "Failed to get explanation. Please try again.";
+                    explanationText.classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error("Error generating explanation:", error);
+                explanationText.textContent = "An error occurred while fetching the explanation.";
+                explanationText.classList.remove('hidden');
+            } finally {
+                loadingExplanation.classList.add('hidden');
+                explainAnswerButton.disabled = false;
+            }
+        }
+
+        /**
+         * Calls the Gemini API to generate a new space quiz question.
+         */
+        async function generateNewQuestion() {
+            loadingNewQuestion.classList.remove('hidden');
+            generateQuestionButton.disabled = true;
+            submitButton.disabled = true; // Disable submit during generation
+
+            const prompt = `Generate a multiple-choice quiz question about space or astronomy. The question should have 4 options, with only one correct answer. Ensure the options are distinct and plausible. Provide the output in JSON format with 'question', 'options' (an array of strings), and 'answer' (the correct option string).`;
+
+            let chatHistory = [];
+            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+            const payload = {
+                contents: chatHistory,
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            "question": { "type": "STRING" },
+                            "options": {
+                                "type": "ARRAY",
+                                "items": { "type": "STRING" }
+                            },
+                            "answer": { "type": "STRING" }
+                        },
+                        "propertyOrdering": ["question", "options", "answer"]
+                    }
+                }
+            };
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const jsonString = result.candidates[0].content.parts[0].text;
+                    const newQuestion = JSON.parse(jsonString);
+
+                    // Add the new question and display it
+                    questions.push(newQuestion);
+                    currentQuestionIndex = questions.length - 1; // Set to the newly added question
+                    displayQuestion();
+                } else {
+                    feedbackMessage.textContent = "Failed to generate a new question. Please try again.";
+                    feedbackMessage.style.color = '#f56565';
+                    feedbackMessage.classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error("Error generating new question:", error);
+                feedbackMessage.textContent = "An error occurred while generating a new question.";
+                feedbackMessage.style.color = '#f56565';
+                feedbackMessage.classList.remove('hidden');
+            } finally {
+                loadingNewQuestion.classList.add('hidden');
+                generateQuestionButton.disabled = false;
+                submitButton.disabled = false;
+            }
+        }
+
+        // Event Listeners
+        submitButton.addEventListener('click', () => {
+            if (submitButton.textContent === 'Submit Answer') {
+                checkAnswer();
+            } else {
+                nextQuestion();
+            }
+        });
+
+        playAgainButton.addEventListener('click', resetQuiz);
+        explainAnswerButton.addEventListener('click', explainAnswer);
+        generateQuestionButton.addEventListener('click', generateNewQuestion);
+
+
+        // Initialize the quiz when the page loads
+        document.addEventListener('DOMContentLoaded', displayQuestion);
+    </script>
+</body>
+</html>

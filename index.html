@@ -1,291 +1,253 @@
-import React, { useState, useEffect, useCallback } from 'react';
-
-// Main App component
-export default function App() {
-  const [currentQuestion, setCurrentQuestion] = useState(null); // Holds the single current question
-  const [questionCount, setQuestionCount] = useState(0); // Tracks how many questions have been asked
-  const [score, setScore] = useState(0);
-  const [quizStarted, setQuizStarted] = useState(false);
-  const [quizEndedByUser, setQuizEndedByUser] = useState(false); // State to track if quiz was ended by user
-  const [quizEndedByWrongAnswer, setQuizEndedByWrongAnswer] = useState(false); // State to track if quiz ended due to wrong answer
-  const [selectedAnswer, setSelectedAnswer] = useState(null);
-  const [feedback, setFeedback] = useState('');
-  const [loading, setLoading] = useState(false); // Loading state for fetching questions
-  const [error, setError] = useState('');
-  const [askedQuestions, setAskedQuestions] = useState([]); // Stores text of questions already asked
-
-  // Function to fetch a single quiz question from the Gemini API
-  // Use useCallback to memoize this function, preventing unnecessary re-creations
-  const fetchAndSetNewQuestion = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    setCurrentQuestion(null); // Clear current question while loading to show loading indicator
-    try {
-      // Dynamically include previously asked questions to avoid repetition
-      let prompt = "Generate 1 unique and diverse multiple-choice quiz question about space. The question should have a 'question' field, an 'options' array (with 4 distinct options), and a 'correctAnswer' field (which is one of the options).";
-
-      // Add negative constraint based on previously asked questions
-      if (askedQuestions.length > 0) {
-        // Stringify the array for the prompt to ensure it's properly formatted for the LLM
-        prompt += ` Do not generate any of the following questions: ${JSON.stringify(askedQuestions)}.`;
-      }
-      // Also keep the general negative constraint for very common questions
-      prompt += " Avoid very common questions like 'Which planet is known as the Red Planet?'";
-
-
-      // Prepare the chat history for the API request
-      let chatHistory = [];
-      chatHistory.push({ role: "user", parts: [{ text: prompt }] });
-
-      // Define the payload for the Gemini API call, including the response schema
-      const payload = {
-        contents: chatHistory,
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "ARRAY",
-            items: {
-              type: "OBJECT",
-              properties: {
-                "question": { "type": "STRING" },
-                "options": {
-                  "type": "ARRAY",
-                  "items": { "type": "STRING" }
-                },
-                "correctAnswer": { "type": "STRING" }
-              },
-              "propertyOrdering": ["question", "options", "correctAnswer"]
-            }
-          }
-        }
-      };
-
-      // API key is left empty as it will be provided by the Canvas environment
-      const apiKey = "";
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-
-      // Make the API call to Gemini
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      // Parse the JSON response
-      const result = await response.json();
-
-      // Check if the response contains valid data and parse the question
-      if (result.candidates && result.candidates.length > 0 &&
-          result.candidates[0].content && result.candidates[0].content.parts &&
-          result.candidates[0].content.parts.length > 0) {
-        const jsonString = result.candidates[0].content.parts[0].text;
-        const parsedQuestions = JSON.parse(jsonString);
-        // Assuming the API returns an array with one question object
-        if (parsedQuestions && parsedQuestions.length > 0) {
-          const newQuestion = parsedQuestions[0];
-          // Client-side safeguard: Check if the new question is already in askedQuestions
-          if (askedQuestions.includes(newQuestion.question)) {
-            console.warn("LLM generated a repeated question. Retrying...");
-            // If repeated, try fetching again. This could lead to a loop if LLM is stubborn.
-            fetchAndSetNewQuestion(); // Recursive call to try again
-            return; // Exit current function to avoid setting the repeated question
-          }
-
-          setCurrentQuestion(newQuestion); // Set the new question
-          setQuestionCount(prevCount => prevCount + 1); // Increment question count for every new question fetched
-          setAskedQuestions(prev => [...prev, newQuestion.question]); // Add new question to history
-        } else {
-          setError('Received empty question data. Please try again.');
-        }
-      } else {
-        setError('Failed to load question. Please try again.');
-      }
-    } catch (err) {
-      console.error("Error fetching quiz question:", err);
-      setError('An error occurred while fetching question. Please check your network connection.');
-    } finally {
-      setLoading(false);
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Space Quiz</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      background: linear-gradient(135deg, #1a202c, #4c51bf);
+      min-height: 100vh;
+      color: #fff;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
     }
-  }, [askedQuestions]); // Dependency on askedQuestions so useCallback re-creates if history changes
-
-  // Effect hook to fetch the first question when the quiz starts
-  useEffect(() => {
-    // This effect runs only when quizStarted becomes true and no question is loaded yet
-    if (quizStarted && !currentQuestion && !loading && !quizEndedByUser && !quizEndedByWrongAnswer) {
-      fetchAndSetNewQuestion();
+    .container {
+      background: #2d3748;
+      padding: 2rem 2.5rem;
+      border-radius: 1rem;
+      box-shadow: 0 0 32px #0003;
+      max-width: 420px;
+      width: 100%;
     }
-  }, [quizStarted, currentQuestion, loading, quizEndedByUser, quizEndedByWrongAnswer, fetchAndSetNewQuestion]);
-
-  // Function to handle starting a new quiz
-  const startQuiz = () => {
-    setQuizStarted(true);
-    setQuizEndedByUser(false); // Reset quiz ended state
-    setQuizEndedByWrongAnswer(false); // Reset wrong answer end state
-    setScore(0);
-    setQuestionCount(0); // Reset question count for a new quiz
-    setSelectedAnswer(null);
-    setFeedback('');
-    setCurrentQuestion(null); // Clear any previous question to ensure a fresh fetch
-    setAskedQuestions([]); // IMPORTANT: Clear asked questions history for a new quiz
-    fetchAndSetNewQuestion(); // Fetch the very first question for the new quiz
-  };
-
-  // Function to handle answer selection
-  const handleAnswerSelect = (option) => {
-    if (selectedAnswer === null && currentQuestion) { // Only allow selection if an answer hasn't been chosen yet and a question exists
-      setSelectedAnswer(option);
-      if (option === currentQuestion.correctAnswer) {
-        setScore(score + 1);
-        setFeedback('Correct!');
-        // Automatically advance to the next question after a short delay (0.5 seconds)
-        setTimeout(() => {
-          setSelectedAnswer(null); // Reset selected answer for next question
-          setFeedback(''); // Clear feedback
-          fetchAndSetNewQuestion(); // Fetch a new question
-        }, 500); // 0.5 second delay
-      } else {
-        setFeedback(`Incorrect. The correct answer was: ${currentQuestion.correctAnswer}`);
-        // End the quiz immediately if the answer is wrong (1.5 seconds delay to show feedback)
-        setTimeout(() => {
-          setQuizEndedByWrongAnswer(true); // Set game over state
-        }, 1500);
-      }
+    h1 {
+      text-align: center;
+      color: #7f9cf5;
+      margin-bottom: 1rem;
     }
-  };
-
-  // Function to handle ending the quiz by user action (still available via button)
-  const endQuiz = () => {
-    setQuizEndedByUser(true);
-  };
-
-  // CSS for the "Game Over" animation
-  const gameOverAnimation = `
+    .question {
+      margin-bottom: 1rem;
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #e0e7ff;
+    }
+    .options button {
+      display: block;
+      width: 100%;
+      margin-bottom: 0.7rem;
+      padding: 0.7rem 1rem;
+      border: none;
+      border-radius: 0.5rem;
+      font-size: 1rem;
+      background: #4c51bf;
+      color: #fff;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .options button.correct {
+      background: #38a169;
+    }
+    .options button.incorrect {
+      background: #e53e3e;
+    }
+    .options button:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+    .scoreboard {
+      text-align: right;
+      color: #b4c6fc;
+      margin-bottom: 0.5rem;
+      font-weight: bold;
+    }
+    .feedback {
+      text-align: center;
+      font-size: 1.1rem;
+      font-weight: bold;
+      margin: 1rem 0;
+    }
+    .end-btn, .retry-btn, .start-btn {
+      width: 100%;
+      padding: 0.7rem 1rem;
+      background: #7f9cf5;
+      border: none;
+      color: #fff;
+      font-weight: bold;
+      border-radius: 0.5rem;
+      font-size: 1rem;
+      cursor: pointer;
+      margin-top: 1rem;
+      transition: background 0.2s;
+    }
+    .end-btn:hover, .retry-btn:hover, .start-btn:hover {
+      background: #5a67d8;
+    }
+    .game-over {
+      text-align: center;
+      color: #e53e3e;
+      font-size: 2rem;
+      font-weight: bold;
+      margin: 1rem 0 0.5rem 0;
+      animation: pulse 1.2s infinite;
+    }
     @keyframes pulse {
-      0% { transform: scale(1); opacity: 1; }
-      50% { transform: scale(1.1); opacity: 0.7; }
-      100% { transform: scale(1); opacity: 1; }
+      0% { opacity: 1; }
+      50% { opacity: 0.7; }
+      100% { opacity: 1; }
     }
-    .game-over-text {
-      animation: pulse 1.5s infinite;
-    }
-  `;
-
-  // Render the quiz UI
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-indigo-900 text-white flex items-center justify-center p-4 font-inter">
-      <style>{gameOverAnimation}</style> {/* Inject animation CSS */}
-      <div className="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-indigo-700">
-        <h1 className="text-4xl font-extrabold text-center mb-6 text-indigo-400">Space Quiz</h1>
-
-        {!quizStarted ? (
-          // Start screen
-          <div className="text-center">
-            <p className="text-lg mb-8">Test your knowledge of the cosmos!</p>
-            <button
-              onClick={startQuiz}
-              className="w-full py-3 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-lg transform transition duration-300 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-75"
-            >
-              Start Quiz
-            </button>
-          </div>
-        ) : loading && !currentQuestion ? (
-          // Loading state for initial or next question
-          <div className="text-center text-xl text-indigo-300">Loading question...</div>
-        ) : error ? (
-          // Error state
-          <div className="text-center text-red-400">
-            <p>{error}</p>
-            <button
-              onClick={startQuiz}
-              className="mt-4 py-2 px-4 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md"
-            >
-              Try Again
-            </button>
-          </div>
-        ) : quizEndedByUser ? ( // Existing: Quiz ended by user screen (via End Quiz button)
-          <div className="text-center">
-            <h2 className="text-3xl font-bold mb-4 text-indigo-400">Quiz Ended!</h2>
-            <p className="text-2xl mb-6">You scored {score} out of {questionCount - 1} questions!</p>
-            <button
-              onClick={startQuiz}
-              className="w-full py-3 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-lg transform transition duration-300 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-75"
-            >
-              Play Again
-            </button>
-          </div>
-        ) : (
-          // Quiz in progress: Display current question
-          currentQuestion ? ( // Ensure currentQuestion exists before rendering its details
-            <div>
-              {/* Scoreboard display */}
-              <div className="text-right text-lg font-bold mb-4 text-indigo-300">
-                Score: {score} / {questionCount - 1}
-              </div>
-              <p className="text-sm text-gray-400 mb-2">Question {questionCount}</p> {/* Display current question number */}
-              <h2 className="text-2xl font-semibold mb-6 text-indigo-200">
-                {currentQuestion.question}
-              </h2>
-              <div className="space-y-4">
-                {currentQuestion.options.map((option, index) => (
-                  <button
-                    key={index}
-                    onClick={() => handleAnswerSelect(option)}
-                    // Disable buttons if an answer is selected OR if the quiz has ended due to a wrong answer
-                    disabled={selectedAnswer !== null || quizEndedByWrongAnswer}
-                    className={`
-                      w-full text-left py-3 px-5 rounded-lg border-2
-                      ${selectedAnswer === option
-                        ? (option === currentQuestion.correctAnswer
-                          ? 'bg-green-700 border-green-500' // Correct selected answer
-                          : 'bg-red-700 border-red-500')   // Incorrect selected answer
-                        : (quizEndedByWrongAnswer && option === currentQuestion.correctAnswer
-                          ? 'border-green-500 bg-green-800' // Highlight correct answer if game over
-                          : 'bg-gray-700 border-gray-600 hover:bg-gray-600') // Unselected answer
-                      }
-                      text-lg font-medium transition duration-200 ease-in-out
-                      ${selectedAnswer === null && !quizEndedByWrongAnswer ? 'cursor-pointer' : 'cursor-not-allowed opacity-80'}
-                    `}
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
-              {feedback && (
-                <p className={`mt-6 text-center text-lg font-semibold ${feedback.startsWith('Correct') ? 'text-green-400' : 'text-red-400'}`}>
-                  {feedback}
-                </p>
-              )}
-
-              {quizEndedByWrongAnswer && ( // Display "GAME OVER!" and "Play Again" button when quiz ends due to wrong answer
-                <div className="text-center mt-8">
-                  <h2 className="text-5xl font-bold mb-4 text-red-500 game-over-text">GAME OVER!</h2>
-                  <button
-                    onClick={startQuiz}
-                    className="w-full py-3 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-lg transform transition duration-300 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-75"
-                  >
-                    Play Again
-                  </button>
-                </div>
-              )}
-
-              {/* Only show End Quiz button if an answer has been selected (and not auto-advancing) AND game is not over by wrong answer */}
-              {selectedAnswer !== null && !quizEndedByWrongAnswer && (
-                <div className="flex flex-col space-y-4 mt-8">
-                  <button
-                    onClick={endQuiz}
-                    className="w-full py-3 px-6 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-lg transform transition duration-300 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-75"
-                  >
-                    End Quiz
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            // Fallback for when current question is not yet loaded (should be covered by loading state)
-            <div className="text-center text-xl text-indigo-300">Preparing question...</div>
-          )
-        )}
-      </div>
+  </style>
+</head>
+<body>
+  <div class="container" id="quiz-app">
+    <h1>Space Quiz</h1>
+    <div id="main-area">
+      <div style="text-align:center;">Loading...</div>
     </div>
-  );
-}
+  </div>
+  <script>
+    // Config
+    const QUESTIONS_PER_QUIZ = 10;
+    const CATEGORY_SCIENCE = 17; // OpenTDB Science & Nature (space questions appear here)
+    const mainArea = document.getElementById('main-area');
+
+    // State
+    let questions = [];
+    let current = 0;
+    let score = 0;
+    let quizOver = false;
+
+    // Fetch questions from Open Trivia DB
+    async function fetchQuestions() {
+      mainArea.innerHTML = '<div style="text-align:center;">Loading questions...</div>';
+      try {
+        // Get 10 questions from Science & Nature, medium or easy
+        const res = await fetch(`https://opentdb.com/api.php?amount=${QUESTIONS_PER_QUIZ}&category=${CATEGORY_SCIENCE}&difficulty=medium&type=multiple`);
+        const data = await res.json();
+        if (data.response_code !== 0 || !data.results || data.results.length === 0) {
+          throw new Error('No questions available');
+        }
+        // Filter for questions containing "space", "planet", "star", etc.
+        questions = data.results.filter(q =>
+          /space|planet|star|moon|galaxy|astronomy|universe|cosmos|solar|orbit|rocket|comet|asteroid/i.test(q.question)
+        );
+        // If not enough space questions, use the whole batch
+        if (questions.length < 5) questions = data.results;
+
+        current = 0;
+        score = 0;
+        quizOver = false;
+        showQuestion();
+      } catch (err) {
+        mainArea.innerHTML = `<div style="color:#e53e3e;text-align:center;">Failed to load quiz questions.<br><button class="retry-btn" onclick="startQuiz()">Try Again</button></div>`;
+      }
+    }
+
+    // Shuffle array helper
+    function shuffle(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    // Decode HTML entities
+    function decode(str) {
+      const txt = document.createElement('textarea');
+      txt.innerHTML = str;
+      return txt.value;
+    }
+
+    function showQuestion() {
+      if (current >= questions.length) {
+        showGameOver();
+        return;
+      }
+
+      const q = questions[current];
+      const allOptions = shuffle([q.correct_answer, ...q.incorrect_answers]);
+      mainArea.innerHTML = `
+        <div class="scoreboard">Score: ${score} / ${current}</div>
+        <div class="question">${decode(q.question)}</div>
+        <div class="options">
+          ${allOptions.map((opt, i) =>
+            `<button onclick="selectAnswer(this, '${encodeURIComponent(opt)}')" data-answer="${encodeURIComponent(opt)}">${decode(opt)}</button>`
+          ).join('')}
+        </div>
+        <button class="end-btn" onclick="endQuiz()">End Quiz</button>
+      `;
+    }
+
+    window.selectAnswer = function(btn, encodedOpt) {
+      if (quizOver) return;
+      const q = questions[current];
+      const correct = encodeURIComponent(q.correct_answer);
+      const buttons = mainArea.querySelectorAll('.options button');
+      buttons.forEach(b => b.disabled = true);
+
+      if (encodedOpt === correct) {
+        btn.classList.add('correct');
+        score++;
+        mainArea.querySelector('.feedback')?.remove();
+        setTimeout(() => {
+          current++;
+          showQuestion();
+        }, 700);
+      } else {
+        btn.classList.add('incorrect');
+        // Highlight correct answer
+        buttons.forEach(b => {
+          if (b.getAttribute('data-answer') === correct) b.classList.add('correct');
+        });
+        showFeedback(`Incorrect. The correct answer was: ${decode(q.correct_answer)}`);
+        setTimeout(showGameOver, 1700);
+      }
+    };
+
+    function showFeedback(msg) {
+      let fb = document.createElement('div');
+      fb.className = 'feedback';
+      fb.textContent = msg;
+      mainArea.appendChild(fb);
+    }
+
+    function showGameOver() {
+      quizOver = true;
+      mainArea.innerHTML = `
+        <div class="game-over">GAME OVER!</div>
+        <div class="scoreboard">Final Score: ${score} / ${current}</div>
+        <button class="retry-btn" onclick="startQuiz()">Play Again</button>
+      `;
+    }
+
+    window.endQuiz = function() {
+      quizOver = true;
+      mainArea.innerHTML = `
+        <div class="game-over">Quiz Ended!</div>
+        <div class="scoreboard">Your Score: ${score} / ${current}</div>
+        <button class="retry-btn" onclick="startQuiz()">Play Again</button>
+      `;
+    };
+
+    window.startQuiz = function() {
+      mainArea.innerHTML = '<div style="text-align:center;">Loading...</div>';
+      fetchQuestions();
+    };
+
+    // Start screen
+    function showStartScreen() {
+      mainArea.innerHTML = `
+        <div style="text-align:center;">
+          <p>Test your knowledge of the cosmos!</p>
+          <button class="start-btn" onclick="startQuiz()">Start Quiz</button>
+        </div>
+      `;
+    }
+
+    showStartScreen();
+  </script>
+</body>
+</html>

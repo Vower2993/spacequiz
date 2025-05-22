@@ -44,6 +44,8 @@
           const [loading, setLoading] = React.useState(false); // Loading state for fetching questions
           const [error, setError] = React.useState('');
           const [askedQuestions, setAskedQuestions] = React.useState([]); // Stores text of questions already asked
+          const [username, setUsername] = React.useState(''); // State to store the user's name
+          const [autoAdvanceTimer, setAutoAdvanceTimer] = React.useState(null); // To store the timer ID
 
           // Function to fetch a single quiz question from the Gemini API
           const fetchAndSetNewQuestion = React.useCallback(async () => {
@@ -90,7 +92,7 @@
               };
 
               // API key is left empty as it will be provided by the Canvas environment
-              const apiKey = "";
+              const apiKey = "AIzaSyDmWWM52vm6UYa52YEr9qV5LUE-xOp5bFA";
               const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
               // Make the API call to Gemini
@@ -145,6 +147,15 @@
 
           // Function to handle starting a new quiz
           const startQuiz = () => {
+            if (username.trim() === '') { // Validate username
+              setError('Please enter your name to start the quiz.');
+              return;
+            }
+            // Clear any existing auto-advance timer
+            if (autoAdvanceTimer) {
+                clearTimeout(autoAdvanceTimer);
+                setAutoAdvanceTimer(null);
+            }
             setQuizStarted(true);
             setQuizEndedByUser(false);
             setQuizEndedByWrongAnswer(false);
@@ -163,35 +174,74 @@
               setSelectedAnswer(option);
               if (option === currentQuestion.correctAnswer) {
                 setScore(score + 1);
-                setFeedback('Correct!');
-                setTimeout(() => {
+                setFeedback(username + ' correct but you\'re still dumb you just got lucky');
+                // Set auto-advance timer
+                const timer = setTimeout(() => {
                   setSelectedAnswer(null);
                   setFeedback('');
                   fetchAndSetNewQuestion();
-                }, 500);
+                }, 5000); // Changed from 3000ms to 5000ms
+                setAutoAdvanceTimer(timer); // Store timer ID
               } else {
-                setFeedback(`Incorrect. The correct answer was: ${currentQuestion.correctAnswer}`);
-                // No setTimeout here, we want to immediately show game over elements
-                setQuizEndedByWrongAnswer(true); // Set game over state
+                setFeedback(username + ' you\'re dumb as fuck');
+                setQuizEndedByWrongAnswer(true); // Set game over state immediately
               }
             }
           };
 
+          // Function to manually advance to the next question
+          const handleNextQuestionManual = () => {
+              if (autoAdvanceTimer) {
+                  clearTimeout(autoAdvanceTimer); // Clear auto-advance timer if manually advancing
+                  setAutoAdvanceTimer(null);
+              }
+              setSelectedAnswer(null);
+              setFeedback('');
+              fetchAndSetNewQuestion();
+          };
+
           // Function to handle ending the quiz by user action
           const endQuiz = () => {
+            // Clear any existing auto-advance timer before ending quiz
+            if (autoAdvanceTimer) {
+                clearTimeout(autoAdvanceTimer);
+                setAutoAdvanceTimer(null);
+            }
             setQuizEndedByUser(true);
           };
 
           // Render the quiz UI
           return (
             <div className="min-h-screen bg-gradient-to-br from-gray-900 to-indigo-900 text-white flex items-center justify-center p-4 font-inter">
+              <style>{`
+                @keyframes pulse {
+                  0% { transform: scale(1); opacity: 1; }
+                  50% { transform: scale(1.1); opacity: 0.7; }
+                  100% { transform: scale(1); opacity: 1; }
+                }
+                .game-over-text {
+                  animation: pulse 1.5s infinite;
+                }
+              `}</style> {/* Inject animation CSS */}
               <div className="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-indigo-700">
                 <h1 className="text-4xl font-extrabold text-center mb-6 text-indigo-400">Space Quiz</h1>
 
                 {!quizStarted ? (
-                  // Start screen
+                  // Start screen with username input
                   <div className="text-center">
-                    <p className="text-lg mb-8">Test your knowledge of the cosmos!</p>
+                    <p className="text-lg mb-4">Test your knowledge of the cosmos!</p>
+                    <div className="mb-6">
+                      <label htmlFor="username" className="block text-lg font-medium text-gray-300 mb-2">Enter your name:</label>
+                      <input
+                        type="text"
+                        id="username"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        placeholder="Your Name"
+                        className="w-full px-4 py-2 rounded-lg bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                      {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
+                    </div>
                     <button
                       onClick={startQuiz}
                       className="w-full py-3 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-lg transform transition duration-300 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-75"
@@ -202,7 +252,7 @@
                 ) : loading && !currentQuestion ? (
                   // Loading state for initial or next question
                   <div className="text-center text-xl text-indigo-300">Loading question...</div>
-                ) : error ? (
+                ) : error && quizStarted ? ( // Display error during quiz if API fails
                   // Error state
                   <div className="text-center text-red-400">
                     <p>{error}</p>
@@ -216,7 +266,10 @@
                 ) : quizEndedByUser ? ( // Existing: Quiz ended by user screen (via End Quiz button)
                   <div className="text-center">
                     <h2 className="text-3xl font-bold mb-4 text-indigo-400">Quiz Ended!</h2>
-                    <p className="text-2xl mb-6">You scored {score} out of {questionCount - 1} questions!</p>
+                    <p className="text-2xl mb-6">
+                        {username && <span className="font-semibold">{username}, </span>}
+                        You scored {score} out of {questionCount - 1} questions!
+                    </p>
                     <button
                       onClick={startQuiz}
                       className="w-full py-3 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-lg transform transition duration-300 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-75"
@@ -225,11 +278,12 @@
                     </button>
                   </div>
                 ) : (
-                  // Quiz in progress: Display current question
+                  // Quiz in progress: Display current question (this block now handles game over by wrong answer too)
                   currentQuestion ? ( // Ensure currentQuestion exists before rendering its details
                     <div>
                       {/* Scoreboard display */}
                       <div className="text-right text-lg font-bold mb-4 text-indigo-300">
+                        {username && <span className="mr-2">{username}</span>}
                         Score: {score} / {questionCount - 1}
                       </div>
                       <p className="text-sm text-gray-400 mb-2">Question {questionCount}</p> {/* Display current question number */}
@@ -262,7 +316,7 @@
                         ))}
                       </div>
                       {feedback && (
-                        <p className={`mt-6 text-center text-lg font-semibold ${feedback.startsWith('Correct') ? 'text-green-400' : 'text-red-400'}`}>
+                        <p className={`mt-6 text-center text-lg font-semibold ${feedback.startsWith(username + ' correct') ? 'text-green-400' : 'text-red-400'}`}>
                           {feedback}
                         </p>
                       )}
@@ -279,9 +333,17 @@
                         </div>
                       )}
 
-                      {/* Only show End Quiz button if an answer has been selected (and not auto-advancing) AND game is not over by wrong answer */}
+                      {/* NEW: Next Question button for correct answers, and End Quiz button */}
                       {selectedAnswer !== null && !quizEndedByWrongAnswer && (
                         <div className="flex flex-col space-y-4 mt-8">
+                          {selectedAnswer === currentQuestion.correctAnswer && (
+                            <button
+                              onClick={handleNextQuestionManual}
+                              className="w-full py-3 px-6 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-lg transform transition duration-300 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-75"
+                            >
+                              Next Question
+                            </button>
+                          )}
                           <button
                             onClick={endQuiz}
                             className="w-full py-3 px-6 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-lg transform transition duration-300 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-75"
